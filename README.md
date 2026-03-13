@@ -19,7 +19,7 @@ This repository now follows the same pattern as the linear/imputation repos:
 ## Quick start (mock)
 
 ```bash
-source /home/debian/Desktop/code/.venv/bin/activate
+source .venv/bin/activate
 pip install -e .
 python test/test.py
 ```
