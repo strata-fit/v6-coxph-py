@@ -8,6 +8,9 @@ from scipy.stats import chi2, norm
 from vantage6.algorithm.client import AlgorithmClient
 from vantage6.algorithm.tools.util import error, info, warn
 from v6_federated_core import (
+    ConfigError,
+    DataContractError,
+    InfrastructureError,
     MethodContext,
     MethodRegistry,
     MethodSpec,
@@ -32,14 +35,14 @@ LARGE_VALUE_WARNING_THRESHOLD = 10.0
 def _get_client(context: MethodContext) -> AlgorithmClient:
     client = context.meta.get("client")
     if client is None:
-        raise RuntimeError("Method context is missing the AlgorithmClient")
+        raise InfrastructureError("Method context is missing the AlgorithmClient")
     return client
 
 
 def _get_dataframe(context: MethodContext) -> pd.DataFrame:
     df = context.meta.get("df")
     if df is None:
-        raise RuntimeError("Method context is missing the dataframe")
+        raise InfrastructureError("Method context is missing the dataframe")
     return df
 
 
@@ -64,7 +67,7 @@ def _run_partial_task(
     description: str,
 ) -> List[Dict[str, Any]]:
     if not organization_ids:
-        raise RuntimeError("No organizations available for partial task dispatch")
+        raise ConfigError("No organizations available for partial task dispatch")
 
     info(
         f"Creating partial task '{input_.get('method')}' for "
@@ -78,7 +81,54 @@ def _run_partial_task(
     )
     info(f"Waiting for partial task results (task_id={task['id']})")
     results = client.wait_for_results(task_id=task["id"])
-    return [_parse_partial_result(result) for result in results]
+    parsed = [_parse_partial_result(result) for result in results]
+
+    expected = len(organization_ids)
+    received = len(parsed)
+    if received < expected:
+        status_counts: Dict[str, int] = {}
+        try:
+            run_rows = client.run.list(task=task["id"], per_page=1000)
+            run_data = run_rows.get("data", []) if isinstance(run_rows, dict) else run_rows
+            for run in run_data:
+                status = str(run.get("status", "unknown"))
+                status_counts[status] = status_counts.get(status, 0) + 1
+        except Exception:
+            # Best effort only; do not mask the missing-result error.
+            status_counts = {}
+
+        raise PartialFailureError(
+            "One or more partial runs did not return results",
+            meta={
+                "task_id": task.get("id"),
+                "expected_results": expected,
+                "received_results": received,
+                "run_status_counts": status_counts,
+            },
+        )
+
+    return parsed
+
+
+def _normalize_database_labels(labels: Optional[List[str]]) -> List[str]:
+    if labels:
+        normalized = [str(label).strip() for label in labels if str(label).strip()]
+        if normalized:
+            return list(dict.fromkeys(normalized))
+    return ["default"]
+
+
+def _ensure_client_databases(
+    client: AlgorithmClient,
+    labels: Optional[List[str]] = None,
+) -> None:
+    existing = getattr(client, "databases", None) or []
+    if existing and labels is None:
+        return
+
+    normalized = _normalize_database_labels(labels)
+    client.databases = [{"label": label} for label in normalized]
+    info(f"Using database labels for subtasks: {normalized}")
 
 
 def _safe_inverse(matrix: np.ndarray) -> np.ndarray:
@@ -191,9 +241,10 @@ def central_handler(
     context: Optional[MethodContext] = None,
 ) -> Dict[str, Any]:
     if context is None:
-        raise RuntimeError("Method context is required for the central handler")
+        raise InfrastructureError("Method context is required for the central handler")
 
     client = _get_client(context)
+    _ensure_client_databases(client, data.database_labels)
     ids = _resolve_organization_ids(client, data.organization_ids, context)
     excluded_ids: List[int] = []
 
@@ -210,7 +261,9 @@ def central_handler(
     while True:
         if n_loops >= MAX_N_THRESHOLD_RETRIES:
             error("Sample size threshold could not be met after retries")
-            raise ValueError("Sample size threshold could not be met after retries")
+            raise DataContractError(
+                "Sample size threshold could not be met after retries"
+            )
         n_loops += 1
         loop_excluded: List[int] = []
 
@@ -399,7 +452,9 @@ def get_unique_event_times_handler(
     context: Optional[MethodContext] = None,
 ) -> Dict[str, Any]:
     if context is None:
-        raise RuntimeError("Method context is required for get_unique_event_times")
+        raise InfrastructureError(
+            "Method context is required for get_unique_event_times"
+        )
 
     df = _get_dataframe(context)
     client = context.meta.get("client")
@@ -422,7 +477,7 @@ def compute_summed_z_handler(
     context: Optional[MethodContext] = None,
 ) -> Dict[str, Any]:
     if context is None:
-        raise RuntimeError("Method context is required for compute_summed_z")
+        raise InfrastructureError("Method context is required for compute_summed_z")
 
     df = _get_dataframe(context)
     info("Computing summed z statistics")
@@ -435,7 +490,7 @@ def perform_iteration_handler(
     context: Optional[MethodContext] = None,
 ) -> Dict[str, Any]:
     if context is None:
-        raise RuntimeError("Method context is required for perform_iteration")
+        raise InfrastructureError("Method context is required for perform_iteration")
 
     df = _get_dataframe(context)
     info("Computing aggregates for the derivation of the partial likelihood")

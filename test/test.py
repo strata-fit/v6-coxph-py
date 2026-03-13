@@ -50,6 +50,27 @@ def test_central_smoke() -> None:
     assert {"Coef", "Exp(coef)", "SE", "Z", "p-value"}.issubset(model_df.columns)
 
 
+def test_central_smoke_legacy_argument_names() -> None:
+    client = build_client()
+    org_ids = [organization["id"] for organization in client.organization.list()]
+
+    task = client.task.create(
+        input_={
+            "method": "central",
+            "kwargs": {
+                "time_column_name": "overall_survival_in_days",
+                "outcome_column_name": "event_overall_survival",
+                "predictors": ["clin_n_1", "index_tumour_location_oropharynx"],
+                "organization_ids": org_ids,
+            },
+        },
+        organizations=[org_ids[0]],
+    )
+    results = client.wait_for_results(task.get("id"))
+    assert len(results) == 1
+    assert "model" in results[0]
+
+
 if __name__ == "__main__":
     test_central_smoke()
     print("mock smoke test passed")

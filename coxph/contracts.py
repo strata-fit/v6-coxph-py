@@ -8,6 +8,7 @@ class CentralInput(BaseModel):
     outcome_col: str
     expl_vars: List[str] = Field(min_length=1)
     organization_ids: Optional[List[int]] = None
+    database_labels: Optional[List[str]] = None
     max_iterations: int = 10
     tolerance: float = 1e-6
 
