@@ -1,12 +1,12 @@
 {
   "name": "coxph",
   "image": "v6-coxph",
-  "vantage6_version": "4.3",
+  "vantage6_version": "4.13.3",
   "partitioning": "horizontal",
   "functions": [
     {
       "name": "central",
-      "description": "Federated algorithm for baseline hazard curve in Vantage6 v4",
+      "description": "Federated Cox proportional hazards fit with Newton-Raphson iterations",
       "type": "central",
       "databases": [],
       "arguments": [
@@ -21,7 +21,7 @@
           "description": ""
         },
         {
-          "name": "expl_var",
+          "name": "expl_vars",
           "type": "",
           "description": ""
         },
@@ -29,12 +29,22 @@
           "name": "organization_ids",
           "type": "",
           "description": ""
+        },
+        {
+          "name": "max_iterations",
+          "type": "",
+          "description": ""
+        },
+        {
+          "name": "tolerance",
+          "type": "",
+          "description": ""
         }
       ]
     },
     {
       "name": "get_unique_event_times",
-      "description": "",
+      "description": "Partial step to return event-time frequencies",
       "type": "federated",
       "databases": [
         {
@@ -56,12 +66,53 @@
           "description": ""
         },
         {
-          "name": "expl_var",
+          "name": "minimum_events",
+          "type": "",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "name": "compute_summed_z",
+      "description": "Partial step to compute summed covariates over event rows",
+      "type": "federated",
+      "databases": [],
+      "arguments": [
+        {
+          "name": "outcome_col",
           "type": "",
           "description": ""
         },
         {
-          "name": "organization_ids",
+          "name": "expl_vars",
+          "type": "",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "name": "perform_iteration",
+      "description": "Partial step to compute risk-set aggregates for one Newton update",
+      "type": "federated",
+      "databases": [],
+      "arguments": [
+        {
+          "name": "time_col",
+          "type": "",
+          "description": ""
+        },
+        {
+          "name": "expl_vars",
+          "type": "",
+          "description": ""
+        },
+        {
+          "name": "beta",
+          "type": "",
+          "description": ""
+        },
+        {
+          "name": "unique_time_events",
           "type": "",
           "description": ""
         }

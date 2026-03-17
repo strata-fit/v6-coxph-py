@@ -1,54 +1,90 @@
-name: Create and publish a Docker image
+name: Vantage6 Algorithm CI
 
 on:
   push:
+    branches:
+      - main
     tags:
-      - '*'
+      - 'release/v*.*.*'
+      - 'dev'
+  pull_request:
+    branches:
+      - main
 
 env:
   REGISTRY: ghcr.io
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
-  build-and-push-image:
-    runs-on:  ubuntu-latest
-    permissions:
-      contents: read
-      packages:  write
+  lint-and-test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
         with:
-          fetch-depth: 0  # Fetch all history to determine branch
+          python-version: 3.11
 
-      - name:  Determine branch name from tag
-        id: get_branch
+      - name: Install dependencies
         run: |
-          # Get the branch that contains this tag
-          BRANCH=$(git branch -r --contains ${{ github.ref }} | grep -v HEAD | head -n 1 | sed 's/.*origin\///')
-          echo "Branch detected: $BRANCH"
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          python -m pip install --upgrade pip
+          pip install flake8
 
-      - name: Set image name based on branch
+      - name: Lint with flake8
         run: |
-          REPO_LOWER=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')
-          BRANCH_NAME=$(echo ${{ steps.get_branch.outputs.branch }} | sed 's/\//-/g')
-          
-          # Create image name with branch suffix
-          echo "IMAGE_NAME=${REPO_LOWER}-${BRANCH_NAME}" >> $GITHUB_ENV
-          echo "IMAGE_TAG=${{ github.ref_name }}" >> $GITHUB_ENV
-          
-          echo "Building image:  ${REPO_LOWER}-${BRANCH_NAME}:${{ github.ref_name }}"
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+
+  build-and-push:
+    name: Build and Push Docker Image
+    if: startsWith(github.ref, 'refs/tags/release/v') || github.ref == 'refs/tags/dev'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract tag name
+        id: extract_tag
+        run: |
+          RAW_TAG="${GITHUB_REF#refs/tags/}"
+          RELEASE_TAG="${RAW_TAG#release/}"
+          SAFE_TAG="${RAW_TAG//\//-}"
+          echo "raw_tag=${RAW_TAG}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "safe_tag=${SAFE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Downcase REPO name
+        run: echo "REPO=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: Log in to the Container registry
-        uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github. actor }}
+          username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@4a13e500e55cf31b7a5d59a38ab2040ab0f42f56
+      - name: Build and push Docker image (release)
+        if: startsWith(github.ref, 'refs/tags/release/v')
+        uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          tags: |
+            ghcr.io/${{ env.REPO }}:latest
+            ghcr.io/${{ env.REPO }}:${{ steps.extract_tag.outputs.release_tag }}
+
+      - name: Build and push Docker image (dev)
+        if: github.ref == 'refs/tags/dev'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./
+          push: true
+          tags: ghcr.io/${{ env.REPO }}:dev
